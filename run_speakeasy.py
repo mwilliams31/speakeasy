@@ -26,7 +26,8 @@ def get_logger():
     return logger
 
 
-def emulate_binary(q, exit_event, fpath, cfg, argv, do_raw, arch='', drop_path='', dump_path=''):
+def emulate_binary(q, exit_event, fpath, cfg, argv, do_raw, arch='', drop_path='', dump_path='',
+                   raw_offset=0x0):
     """
     Setup the binary for emulation
     """
@@ -46,7 +47,7 @@ def emulate_binary(q, exit_event, fpath, cfg, argv, do_raw, arch='', drop_path='
                 raise Exception('Unsupported architecture: %s' % arch)
 
             sc_addr = se.load_shellcode(fpath, arch)
-            se.run_shellcode(sc_addr)
+            se.run_shellcode(sc_addr, offset=raw_offset or 0)
         else:
             module = se.load_module(fpath)
             se.run_module(module, all_entrypoints=True)
@@ -86,6 +87,7 @@ class Main(object):
         self.config_path = args.config
         self.cfg = None
         self.do_raw = args.do_raw
+        self.raw_offset = args.raw_offset
         self.do_memtrace = args.do_memtrace
         self.module_dir = args.module_dir
         self.arch = args.arch
@@ -146,15 +148,21 @@ class Main(object):
             # Emulate within the current process, losing some control with execution but
             # allows us to debug speakeasy.
             emulate_binary(q, evt, args.target,
-                self.cfg, self.argv, self.do_raw, self.arch,
-                self.drop_files_path, self.dump_path
-            )
+                           self.cfg, self.argv, self.do_raw, self.arch,
+                           self.drop_files_path, self.dump_path,
+                           raw_offset=self.raw_offset
+                           )
             report = q.get()
         else:
-            # We are using a child process here so we can maintain absolute control over its execution
-            p = mp.Process(target=emulate_binary, args=(q, evt, args.target, self.cfg,
-                                                        self.argv, self.do_raw, self.arch,
-                                                        self.drop_files_path, self.dump_path))
+            # We are using a child process here so we can maintain absolute control over its
+            # execution
+            p = mp.Process(target=emulate_binary,
+                           args=(q, evt, args.target, self.cfg,
+                                 self.argv, self.do_raw, self.arch,
+                                 self.drop_files_path, self.dump_path),
+                           kwargs={
+                               "raw_offset": self.raw_offset
+                           })
             p.start()
 
             report = None
@@ -163,7 +171,7 @@ class Main(object):
                 if self.timeout and self.timeout < (time.time() - start_time):
                     evt.set()
                     self.logger.error('* Child process timeout reached after %d seconds' %
-                                    (self.timeout))
+                                      (self.timeout))
                     report = q.get(5)
                 try:
                     report = q.get(timeout=1)
@@ -206,6 +214,8 @@ if __name__ == '__main__':
     parser.add_argument('-r', '--raw', action='store_true', dest='do_raw',
                         required=False, help='Attempt to emulate file as-is '
                                              'with no parsing (e.g. shellcode)')
+    parser.add_argument('--raw_offset', type=lambda s: int(s, 0x10), default=0,
+                        required=False, help='When in raw mode, offset (hex) to start emulating')
     parser.add_argument('-a', '--arch', action='store', dest='arch',
                         required=False,
                         help='Force architecture to use during emulation (for '

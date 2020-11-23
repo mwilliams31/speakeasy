@@ -299,10 +299,10 @@ class AdvApi32(api.ApiHandler):
                     argv[1] = lpSubKey
                     self.emu.reg_create_key(key.get_path() + '\\' + lpSubKey)
                 else:
-                    phkResult = hkey
+                    hkey = (hkey).to_bytes(self.get_ptr_size(), 'little')
+                    self.mem_write(phkResult, hkey)
                     rv = windefs.ERROR_SUCCESS
         return rv
-
 
     @apihook('RegQueryInfoKey', argc=12, conv=_arch.CALL_CONV_STDCALL)
     def RegQueryInfoKey(self, emu, argv, ctx={}):
@@ -682,7 +682,7 @@ class AdvApi32(api.ApiHandler):
             argv[2] = prov_str
 
         cm = emu.get_crypt_manager()
-        hnd = cm.crypt_open(cont_str, prov_str, dwProvType, dwFlags)
+        hnd = cm.crypt_open(cname=cont_str, pname=prov_str, ptype=dwProvType, flags=dwFlags)
 
         if hnd and phProv:
             self.mem_write(phProv, hnd.to_bytes(emu.get_ptr_size(), 'little'))
@@ -1058,8 +1058,8 @@ class AdvApi32(api.ApiHandler):
         hnd.update(data)
         return 1
 
-    @apihook('RegGetValueW', argc=7, conv=_arch.CALL_CONV_STDCALL)
-    def RegGetValueW(self, emu, argv, ctx={}):
+    @apihook('RegGetValue', argc=7, conv=_arch.CALL_CONV_STDCALL)
+    def RegGetValue(self, emu, argv, ctx={}):
         '''
         LSTATUS RegGetValueW(
             HKEY    hkey,

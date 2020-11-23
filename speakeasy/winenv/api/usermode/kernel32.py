@@ -251,6 +251,36 @@ class Kernel32(api.ApiHandler):
         argv[2] = name
         return hnd
 
+    @apihook('CreateMutexEx', argc=4)
+    def CreateMutexEx(self, emu, argv, ctx={}):
+        '''
+        HANDLE CreateMutexExA(
+          LPSECURITY_ATTRIBUTES lpMutexAttributes,
+          LPCSTR                lpName,
+          DWORD                 dwFlags,
+          DWORD                 dwDesiredAccess
+        );
+        '''
+        attrs, name, flags, access = argv
+
+        cw = self.get_char_width(ctx)
+
+        if name:
+            name = self.read_mem_string(name, cw)
+
+        obj = self.get_object_from_name(name)
+
+        hnd = 0
+        if obj:
+            hnd = emu.get_object_handle(obj)
+            emu.set_last_error(windefs.ERROR_ALREADY_EXISTS)
+        else:
+            emu.set_last_error(windefs.ERROR_SUCCESS)
+            hnd, evt = emu.create_mutant(name)
+
+        argv[1] = name
+        return hnd
+
     @apihook('LoadLibrary', argc=1)
     def LoadLibrary(self, emu, argv, ctx={}):
         '''HMODULE LoadLibrary(
@@ -2318,6 +2348,9 @@ class Kernel32(api.ApiHandler):
         (CodePage, dwFlags, lpMultiByteStr, cbMultiByte,
          lpWideCharStr, cchWideChar) = argv
 
+        cchWideChar = cchWideChar & 0xFFFFFFFF
+        cbMultiByte = cbMultiByte & 0xFFFFFFFF
+
         rv = 0
         if cchWideChar == 0:
             if cbMultiByte == 0xFFFFFFFF:
@@ -2968,7 +3001,6 @@ class Kernel32(api.ApiHandler):
             emu.set_last_error(windefs.ERROR_FILE_NOT_FOUND)
             return 0
 
-
     @apihook('ReadFile', argc=5)
     def ReadFile(self, emu, argv, ctx={}):
         '''
@@ -3539,15 +3571,34 @@ class Kernel32(api.ApiHandler):
     @apihook('GetLocaleInfo', argc=4)
     def GetLocaleInfo(self, emu, argv, ctx={}):
         '''
-        int GetLocaleInfoA(
+        int GetLocaleInfo(
           LCID   Locale,
           LCTYPE LCType,
           LPSTR  lpLCData,
           int    cchData
         );
         '''
+        Locale, LCType, lpLCData, cchData = argv
 
         rv = 0
+        cw = self.get_char_width(ctx)
+
+        lcid = k32types.get_define(Locale, 'LOCALE_')
+        if lcid:
+            argv[0] = lcid
+
+        lctype = k32types.get_define(LCType, 'LOCALE_')
+        if lctype:
+            argv[1] = lctype
+            locale_data = ''
+            if lctype == 'LOCALE_SENGLISHCOUNTRYNAME':
+                locale_data = 'United States'
+            elif lctype == 'LOCALE_SENGLISHLANGUAGENAME':
+                locale_data = 'English'
+
+            if locale_data:
+                self.write_mem_string(locale_data, lpLCData, cw)
+                rv = len(locale_data) + cw
 
         return rv
 
@@ -4293,6 +4344,27 @@ class Kernel32(api.ApiHandler):
 
         return len(out) + 1
 
+    @apihook('GetLongPathName', argc=3)
+    def GetLongPathName(self, emu, argv, ctx={}):
+        """
+        DWORD GetLongPathNameA(
+          LPCSTR lpszShortPath,
+          LPSTR  lpszLongPath,
+          DWORD  cchBuffer
+        );
+        """
+        lpszShortPath, lpszLongPath, cchBuffer = argv
+
+        # Not an accurate implementation, just a placeholder for now
+        cw = self.get_char_width(ctx)
+        s = self.read_mem_string(lpszShortPath, cw)
+        argv[0] = s
+
+        self.write_mem_string(s, lpszLongPath, cw)
+        argv[1] = s
+
+        return len(s) * cw + 1
+
     @apihook('QueueUserAPC', argc=3)
     def QueueUserAPC(self, emu, argv, ctx={}):
         """
@@ -4420,3 +4492,14 @@ class Kernel32(api.ApiHandler):
         dest, length = argv
         buf = b'\x00' * length
         self.mem_write(dest, buf)
+
+    @apihook('QueryPerformanceFrequency', argc=1)
+    def QueryPerformanceFrequency(self, emu, argv, ctx={}):
+        """
+        BOOL QueryPerformanceFrequency(
+            LARGE_INTEGER *lpFrequency
+        );
+        """
+        lpFrequency = argv[0]
+        self.mem_write(lpFrequency, (10000000).to_bytes(8, 'little'))
+        return 1
