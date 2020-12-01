@@ -143,7 +143,7 @@ class Speakeasy(object):
             cb, ctx = h
             self.add_interrupt_hook(cb, ctx)
 
-    def disasm(self, addr: int, size: int):
+    def disasm(self, addr: int, size: int, fast=True):
         """
         Get the disassembly from an address
 
@@ -153,7 +153,7 @@ class Speakeasy(object):
         return:
             A tuple of: (mnemonic, operands, and the full instruction)
         """
-        return self.emu.get_disasm(addr, size)
+        return self.emu.get_disasm(addr, size, fast)
 
     def is_pe(self, data: bytes) -> bool:
         """
@@ -265,7 +265,7 @@ class Speakeasy(object):
         """
         return self.emu.get_json_report()
 
-    def add_api_hook(self, cb: Callable, module='', api_name='', argc=0, call_conv=None):
+    def add_api_hook(self, cb: Callable, module='', api_name='', argc=0, call_conv=None, enable_wild_cards=True):
         """
         Set a callback to fire when a specified API is called during emulation
 
@@ -275,6 +275,7 @@ class Speakeasy(object):
             api_name: Name of the API to hook. Wild cards (e.g. *) are supported.
             argc: force the emulator to account for this amount of arguments (for stack cleanup)
             call_conv: force the emulator to use the supplied calling convention for this hook
+            enable_wild_cards: enable wild cards for this hook
         return:
             Hook object for newly registered hooks
         """
@@ -282,7 +283,19 @@ class Speakeasy(object):
             self.api_hooks.append((cb, module, api_name, argc, call_conv))
             return
         return self.emu.add_api_hook(cb, module=module, api_name=api_name, argc=argc,
-                                     call_conv=call_conv, emu=self)
+                                     call_conv=call_conv, emu=self, enable_wild_cards=enable_wild_cards)
+
+    def resume(self, addr, count=-1):
+        """
+        Resume emulating at the specified address
+
+        args:
+            addr: Address to being emulation at
+            count: number of instructions
+        return:
+            None
+        """
+        self.emu.resume(addr, count=count)
 
     def stop(self) -> None:
         """

@@ -132,6 +132,7 @@ class WindowsEmulator(BinaryEmulator):
         self.do_strings = self.config_analysis.get('strings', False)
         self.registry_config = self.config.get('registry', {})
         self.modules_always_exist = self.config_modules.get('modules_always_exist', False)
+        self.functions_always_exist = self.config_modules.get('functions_always_exist', False)
 
     def get_registry_config(self):
         """
@@ -386,6 +387,13 @@ class WindowsEmulator(BinaryEmulator):
             self.mem_map(self.page_size, base=0xFFFFF78000000000,
                          tag='emu.struct.KUSER_SHARED_DATA')
 
+    def resume(self, addr, count=-1):
+        """
+        Resume emulation at the specified address.
+        """
+        self.emu_eng.start(addr, timeout=self.timeout,
+                           count=count)
+
     def start(self):
         """
         Begin emulation executing each run in the specified run queue
@@ -474,7 +482,10 @@ class WindowsEmulator(BinaryEmulator):
         """
         Terminate a process (i.e. remove it from the known process list)
         """
-        self.processes.remove(proc)
+        try:
+            self.processes.remove(proc)
+        except ValueError:
+            pass
 
     def get_current_thread(self):
         """
@@ -1145,6 +1156,16 @@ class WindowsEmulator(BinaryEmulator):
                 self.log_api(ret, imp_api, rv, argv)
                 self.do_call_return(hook.argc, ret, rv, conv=hook.call_conv)
                 return
+            elif self.functions_always_exist:
+                imp_api = '%s.%s' % (dll, name)
+                conv = _arch.CALL_CONV_STDCALL
+                argc = 4
+                argv = self.get_func_argv(conv, argc)
+                rv = 1
+                ret = self.get_ret_address()
+                self.log_api(ret, imp_api, rv, argv)
+                self.do_call_return(argc, ret, rv, conv=conv)
+                return
 
             run = self.get_current_run()
             error = self.get_error_info('unsupported_api', self.get_pc())
@@ -1582,7 +1603,8 @@ class WindowsEmulator(BinaryEmulator):
 
         # Add the newly loaded module to the current process's PEB module list
         proc = self.get_current_process()
-        proc.add_module_to_peb(mod)
+        if self.get_address_map(proc.get_peb_ldr().address):
+            proc.add_module_to_peb(mod)
 
         return mod.get_base()
 
@@ -1679,7 +1701,7 @@ class WindowsEmulator(BinaryEmulator):
         if isinstance(base, str):
             base = int(base, 16)
 
-        mod.decoy_path = modconf.get('path', emu_path)
+        mod.decoy_path = modconf.get('path', emu_path) or (name + '.dll')
         # Reserve memory for the module
         res, size = self.get_valid_ranges(mod.image_size,
                                           base)
@@ -1687,6 +1709,9 @@ class WindowsEmulator(BinaryEmulator):
         mod.name = modconf.get('name', name)
         self.mem_reserve(size, base=res, tag='emu.module.%s' % (mod.name),
                          perms=common.PERM_MEM_RW)
+
+        if mod.decoy_path == '' and name != '':
+            mod.decoy_path = self.config.get('current_dir', 'C:\\Windows\\system32') + '\\' + name
 
         mod.base_name = ntpath.basename(mod.decoy_path)
 
