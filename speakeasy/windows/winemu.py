@@ -1631,6 +1631,7 @@ class WindowsEmulator(BinaryEmulator):
             jit = winemu.JitPeFile(self.get_arch())
 
             funcs = [(f[4], f[0]) for k, f in mod_handler.funcs.items() if isinstance(k, str)]
+            data_exports = [k for k, d in mod_handler.data.items() if isinstance(k, str)]
 
             new = funcs.copy()
 
@@ -1653,6 +1654,7 @@ class WindowsEmulator(BinaryEmulator):
             func_names = new
 
             func_names = [fn for o, fn in func_names]
+            func_names.sort()
 
             exports = []
             ords = [o for o, fn in funcs if o is not None]
@@ -1673,6 +1675,7 @@ class WindowsEmulator(BinaryEmulator):
             if not exports:
                 exports = func_names
 
+            exports += data_exports
             img = jit.get_decoy_pe_image(modname, exports)
             mod = winemu.DecoyModule(data=img)
 
@@ -1926,6 +1929,12 @@ class WindowsEmulator(BinaryEmulator):
             self.set_pc(entry.Handler)
             return True
         return False
+
+    def get_reserved_ranges(self):
+        """
+        Get the allocated memory ranges that the emulator reserves
+        """
+        return (winemu.EMU_RESERVED, winemu.EMU_RESERVED_END)
 
     def _continue_seh_x86(self):
         """
